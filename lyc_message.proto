@@ -1,0 +1,289 @@
+// Lao Yan Cai
+package lyc;
+
+option optimize_for = LITE_RUNTIME;
+
+
+// For all result in Ack, 0 for OK, otherwise error.
+
+message MsgPassportReq
+{
+    required string udid = 1;               // 设备唯一标志: Unique Device ID, max length(??)
+    required int32 version = 2;             // 客户端版本号
+    required string checksum = 3;           // 对udid + account + private key 进行md5，客户端和服务器必须匹配
+    optional int32 userType = 5;            // 用户类型。(0为游客，1为注册帐号，2为facebook帐号）
+    optional string account = 6;            // raw用户名
+    optional string password = 7;           // md5后的密码
+    optional string channel = 8;            // 渠道号
+}
+
+message MsgPassportAck
+{
+    required int32 result = 1;              // 登录结果, 0 for success
+    optional int64 uid = 2;                 // 用户的数字ID
+    optional string token = 3;              // 访问令牌，用于登录主服务器
+    optional string serverIP = 4;           // 分配的主服务器IP
+    optional int32 serverPort = 5;          // 分配的主服务器端口
+    optional string downloadURL = 6;        // 如果登录结果为客户端版本过低，需将下载地址下发给客户端
+}
+
+message MsgLoginReq
+{
+    required int64 uid = 1;                 // 用户的数字ID
+    required string token = 2;              // 访问令牌
+    optional string language = 3;           // 客户端语言, default will depend on server config.
+}
+
+message UserInfo
+{
+    required int64 uid = 1;
+    required string nickName = 2;           // 昵称
+    required int32 gender = 3;              // 性别（0为女，1为男）
+    required int32 coins = 4;               // 金币数
+    required int32 level = 6;               // 称号等级
+    required int32 imageID = 7;             // 用户头像的ID, < 0 for user uploaded, or some thing like that.
+}
+
+message MsgLoginAck
+{
+    required int32 result = 1;              // 登录结果
+    optional UserInfo userInfo = 2;         // basic information
+}
+
+// Later  MsgGetImagReq
+
+message RoomInfo
+{
+    required int32 roomID = 1;              // 房间号
+    required string roomName = 2;           // 房间名称
+    required int32 roomType = 3;            // 房间类型
+    required int32 minCoins = 4;            // 最小金币准入
+    required int32 maxCoins = 5;            // 最大金币准入
+    required int32 ante = 6;                // 底注
+    required int32 actionTimeout = 7;       // Timeout for any action call, in milli seconds.
+}
+
+
+message MsgRoomListReq
+{
+    required int32 roomType = 1;            // 房间类型（0 for all, currently only normal type 1 is implemented)
+}
+
+
+message MsgRoomListAck
+{
+    required int32 result = 1;
+    repeated RoomInfo roomList = 2;         // 房间列表
+}
+
+
+////////////////////////////////////////////////////////////////////
+// Join/Leave related
+//
+message PlayerInfo
+{
+    required int32 seat = 2;
+    optional bool  isDealer = 3;
+    optional bool  isPlaying = 4;
+    optional int32 bet = 5;                 // in coins
+
+    repeated int32 cards = 6;               // number of cards, if negative, means unknown. 
+                                            // 0-51--> c1,d1,h1,s1,c2,d2,h2,s2,...cK,dK,hK,sK, 
+                                            // 52/53: small/big joker, 
+    required UserInfo user = 10;
+}
+
+
+// Player force quit
+message MsgPlayerQuitReq
+{
+    optional int64 uid = 1;
+}
+
+message MsgUserUpdateNtf
+{
+    required UserInfo udpatedInfo = 1;
+}
+
+
+message MsgPlayerMoveNtf
+{
+    required bool isSitedown = 1;       // Otherwise leave
+    optional PlayerInfo player = 2;    // required if not TableDestroyed
+}
+
+
+message MsgSiteDownNtf
+{
+    optional RoomInfo roomInfo = 2;      // needed if start game for quick start
+
+    // table status, seats, etc, 
+    enum TableStatus {
+        TablePending = 1;
+        TablePlaying = 2;
+        TableSquaring = 3;
+    };
+
+    required TableStatus tableStatus = 3;
+    repeated PlayerInfo players = 4;
+}
+
+
+message MsgJoinRoomReq
+{
+    required int32 roomID = 1;              // 房间号, 0 for quick start.
+}
+
+
+message MsgJoinRoomAck
+{
+    required int32 result = 1;
+    optional MsgSiteDownNtf site = 2;
+}
+
+
+// Broadcast
+message MsgGameStartNtf
+{
+    required int32 dealerSeat = 1;
+    required int32 firstBetSeat = 2;
+}
+
+
+message MsgBetReq
+{
+    required float ratio = 1;
+}
+
+
+// Broadcast to every
+message MsgBetAckNtf
+{
+    optional int32 result = 1;    // only if invalid Bet request happen, and Error Ack to the requester.
+                                  // Normally only Notify broadcast to all player.
+    optional int32 seat = 2;
+    optional float ratio = 3;
+    optional int32 bet = 4;       // in coins, consistence with ratio
+
+    optional int32 nextBetSeat = 5;  // if < 0, mean start dealing cards
+}
+
+
+message CardDeal
+{
+    required int32 seat   = 2;
+    repeated int32 cards  = 3;
+}
+
+// Broadcast to diiferent player
+// Yet content for different player will have different content,
+// Only card for himself have real card number, Other card value will be -1.
+message MsgDealCardsNtf 
+{
+    repeated CardDeal deals = 2;
+}
+
+
+enum PlayerAction
+{
+    CallAll = 1;  // Only dealer could use this.
+    Call = 2;     // If non-dealer, it means just call dealer, and his cards must be 8-9. If dealer, the following targetSeat is needed. 
+    Pass = 3;     // Only non-dealer could use this. 
+    OneMore = 4;  // For dealer an normal player. Yet different action followed.
+    Dealer89 = 5; // Server Auto
+}
+
+
+message MsgActionReq
+{
+    required PlayerAction action = 1;
+    optional int32 target = 2;
+}
+
+message PlayerCardChange
+{
+    required int32 seat = 1;
+    repeated int32 existingCards = 2;    // if non -1, means showed.
+    optional int32 newCard = 3;          // if player ask one more.
+}
+
+// Server's command
+message MsgActionAckNtf
+{
+    optional int32 inValidReq = 1;       // only send to the action requester when his req is invalid.
+
+    optional int32 seat = 2;             // -1 means just start, or Server command
+    optional PlayerAction action = 3;
+    optional int32 target = 4;
+
+    repeated PlayerCardChange cardChanges = 5;
+
+    optional int32 nextSeat = 6;         // Next player that should take action. -1 means Squaring started
+}
+
+
+message MsgSquaringNtf
+{
+    repeated PlayerInfo players = 2;    // coins inside here is after accounting.
+    repeated float ratios = 3;           // + or -, 1, -1, 2, -2, 3, -3, ...
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// Delimiter will use fixed size int32 (net work endian) header right before each message.
+// The header value only include message length, do not include the fixed int32 it self.
+enum MsgType 
+{
+    // Message from client to server
+    PassportRequest = 8;
+    LoginRequest = 9;
+    RoomListRequest = 10;
+    JoinRoomRequest = 11;
+    BetReq = 12;
+    ActionReq = 13;
+    PlayerQuitReq = 14;
+
+    // Msg type from server to client
+    PassportAck = 101;
+    LoginAck = 102;
+    RoomListAck = 103;
+    SiteDownNtf = 104;
+    JoinRoomAck = 105;
+    PlayerMoveNtf = 106;
+    GameStartNtf = 107;
+    BetAckNtf = 108;
+    DealCardsNtf = 109;
+    ActionAckNtf = 110;
+    SquaringNtf = 111;
+    UserUpdateNtf = 112;
+}
+
+
+message LycMessage
+{
+    required MsgType msgType = 1;
+
+    optional MsgPassportReq passportReq = 8;
+    optional MsgLoginReq loginReq = 9;
+    optional MsgRoomListReq roomListReq = 10;
+    optional MsgJoinRoomReq joinRoomReq = 11;
+    optional MsgBetReq betReq = 12;
+    optional MsgActionReq actionReq = 13;
+    optional MsgPlayerQuitReq playerQuitReq = 14;
+
+
+    optional MsgPassportAck passportAck = 101;
+    optional MsgLoginAck loginAck = 102;
+    optional MsgRoomListAck roomListAck = 103;
+    optional MsgSiteDownNtf sitdownNtf = 104;
+    optional MsgJoinRoomAck joinRoomAck = 105;
+    optional MsgPlayerMoveNtf playerMoveNtf = 106;
+    optional MsgGameStartNtf gameStartNtf = 107;
+    optional MsgBetAckNtf betAckNtf = 108;
+    optional MsgDealCardsNtf dealCardsNtf = 109;
+    optional MsgActionAckNtf actionAckNtf = 110;
+    optional MsgSquaringNtf squaringNtf = 111;
+    optional MsgUserUpdateNtf userUpdateNtf = 112;
+}
+
+
